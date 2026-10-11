@@ -173,13 +173,30 @@
       if (Array.isArray(rawData)) return rawData;
       if (!rawData || typeof rawData !== 'object') return [];
 
-      // Check common dictionary keys
-      const candidateKeys = ['scenes', 'points', 'nodes', 'data', 'features', 'samples', 'vectors', 'manifold'];
+      // Check if scenes are nested directly inside movie entries
+      if (Array.isArray(rawData.movies)) {
+        let allScenes = [];
+        rawData.movies.forEach(movie => {
+          const scenes = movie.scenes || movie.frames || movie.trajectory || movie.points || [];
+          if (Array.isArray(scenes) && scenes.length > 0) {
+            scenes.forEach(sc => {
+              allScenes.push({
+                ...sc,
+                movie_title: movie.title || movie.name || 'Unknown Movie'
+              });
+            });
+          }
+        });
+
+        if (allScenes.length > 0) return allScenes;
+      }
+
+      // Check top-level array keys
+      const candidateKeys = ['scenes', 'points', 'nodes', 'data', 'features', 'samples', 'vectors', 'manifold', 'movies'];
       for (const key of candidateKeys) {
         if (Array.isArray(rawData[key])) return rawData[key];
       }
 
-      // Fallback: search for the first key in the object that contains an array
       for (const key in rawData) {
         if (Array.isArray(rawData[key])) return rawData[key];
       }
@@ -190,14 +207,12 @@
     function extractCoordinates(item) {
       if (!item) return [0, 0, 0];
       
-      // Direct array format: [x, y, z]
       if (Array.isArray(item) && item.length >= 3) return item.slice(0, 3);
       
-      // Known coordinate key patterns
-      const coords = item.coords_3d || item.coords || item.position || item.vector || item.xyz;
-      if (Array.isArray(coords)) return coords;
+      // Known coordinate key variations
+      const coords = item.coords_3d || item.coords || item.centroid_3d || item.centroid || item.position || item.vector || item.xyz;
+      if (Array.isArray(coords) && coords.length >= 3) return coords;
 
-      // Individual axis properties
       if ('x' in item && 'y' in item && 'z' in item) {
         return [item.x, item.y, item.z];
       }
@@ -210,17 +225,17 @@
       const count = pointsData.length;
 
       if (count === 0) {
-        console.warn("Could not find an array of data points in rosetta_manifold_data.json.");
+        console.warn("Could not find manifold data points in rosetta_manifold_data.json.");
         return;
       }
 
       console.log(`Parsed ${count} manifold nodes.`);
+      if (count > 0) console.log("Sample extracted node:", pointsData[0]);
 
       const geometry = new THREE.BufferGeometry();
       const positions = new Float32Array(count * 3);
       const colors = new Float32Array(count * 3);
 
-      // Metallic Palette
       const baseGold = new THREE.Color(0xd4af37);
       const darkBronze = new THREE.Color(0x8b5a2b);
       const highlightGold = new THREE.Color(0xffe893);
@@ -288,7 +303,8 @@
           if (node) {
             tooltip.style.display = 'block';
             ttImg.src = node.img_base64 || node.thumbnail || node.image || '';
-            ttMeta.innerText = `Chamber: ${node.scene_id || node.id || idx} | Alignment: ${node.alignment_score ? node.alignment_score.toFixed(4) : 'Aligned'}`;
+            const title = node.movie_title || node.title || 'Scene Node';
+            ttMeta.innerText = `${title} | Chamber: ${node.scene_id || node.id || idx}`;
             ttCaption.innerText = node.text_snippet || node.review_text || node.text || node.caption || 'No textual trace recorded.';
           }
         } else {
