@@ -151,18 +151,14 @@
       gridHelper.position.y = -25;
       scene.add(gridHelper);
 
-      // Relative path handling for GitHub Pages sub-directories
-      const jsonPath = './rosetta_manifold_data.json';
-
       // 2. Load Manifold Data
-      fetch(jsonPath)
+      fetch('./rosetta_manifold_data.json')
         .then(res => {
-          if (!res.ok) {
-            throw new Error(`HTTP error! Status: ${res.status}`);
-          }
+          if (!res.ok) throw new Error(`HTTP error! Status: ${res.status}`);
           return res.json();
         })
         .then(data => {
+          console.log("Raw JSON structure loaded:", data);
           buildLamentManifold(data);
         })
         .catch(err => console.error("Error unspooling manifold geometry:", err));
@@ -173,15 +169,52 @@
       animate();
     }
 
+    function extractPointsArray(rawData) {
+      if (Array.isArray(rawData)) return rawData;
+      if (!rawData || typeof rawData !== 'object') return [];
+
+      // Check common dictionary keys
+      const candidateKeys = ['scenes', 'points', 'nodes', 'data', 'features', 'samples', 'vectors', 'manifold'];
+      for (const key of candidateKeys) {
+        if (Array.isArray(rawData[key])) return rawData[key];
+      }
+
+      // Fallback: search for the first key in the object that contains an array
+      for (const key in rawData) {
+        if (Array.isArray(rawData[key])) return rawData[key];
+      }
+
+      return [];
+    }
+
+    function extractCoordinates(item) {
+      if (!item) return [0, 0, 0];
+      
+      // Direct array format: [x, y, z]
+      if (Array.isArray(item) && item.length >= 3) return item.slice(0, 3);
+      
+      // Known coordinate key patterns
+      const coords = item.coords_3d || item.coords || item.position || item.vector || item.xyz;
+      if (Array.isArray(coords)) return coords;
+
+      // Individual axis properties
+      if ('x' in item && 'y' in item && 'z' in item) {
+        return [item.x, item.y, item.z];
+      }
+
+      return [0, 0, 0];
+    }
+
     function buildLamentManifold(data) {
-      // Support array or object root payloads
-      pointsData = Array.isArray(data) ? data : (data.scenes || data.points || []);
+      pointsData = extractPointsArray(data);
       const count = pointsData.length;
 
       if (count === 0) {
-        console.warn("No manifold data points found in JSON structure.");
+        console.warn("Could not find an array of data points in rosetta_manifold_data.json.");
         return;
       }
+
+      console.log(`Parsed ${count} manifold nodes.`);
 
       const geometry = new THREE.BufferGeometry();
       const positions = new Float32Array(count * 3);
@@ -193,9 +226,7 @@
       const highlightGold = new THREE.Color(0xffe893);
 
       pointsData.forEach((item, i) => {
-        // Fallback checks across potential key names
-        const coords = item.coords_3d || item.coords || [0, 0, 0];
-        const [x, y, z] = coords;
+        const [x, y, z] = extractCoordinates(item);
         
         positions[i * 3]     = x;
         positions[i * 3 + 1] = y;
@@ -256,9 +287,9 @@
 
           if (node) {
             tooltip.style.display = 'block';
-            ttImg.src = node.img_base64 || node.thumbnail || '';
-            ttMeta.innerText = `Chamber: ${node.scene_id || idx} | Alignment: ${node.alignment_score ? node.alignment_score.toFixed(4) : 'Aligned'}`;
-            ttCaption.innerText = node.text_snippet || node.review_text || 'No textual trace recorded.';
+            ttImg.src = node.img_base64 || node.thumbnail || node.image || '';
+            ttMeta.innerText = `Chamber: ${node.scene_id || node.id || idx} | Alignment: ${node.alignment_score ? node.alignment_score.toFixed(4) : 'Aligned'}`;
+            ttCaption.innerText = node.text_snippet || node.review_text || node.text || node.caption || 'No textual trace recorded.';
           }
         } else {
           tooltip.style.display = 'none';
