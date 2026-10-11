@@ -7,7 +7,7 @@
   <style>
     :root {
       --bg-color: #0d0e12;
-      --panel-bg: rgba(18, 20, 26, 0.92);
+      --panel-bg: rgba(18, 20, 26, 0.94);
       --border-color: #2a2d3a;
       --accent-color: #3b82f6;
       --text-main: #f1f5f9;
@@ -39,16 +39,17 @@
 
     /* Left Control Sidebar */
     #sidebar {
-      width: 320px;
+      width: 340px;
       height: 100%;
       background: var(--panel-bg);
       border-right: 1px solid var(--border-color);
       padding: 20px;
       display: flex;
       flex-direction: column;
-      gap: 20px;
+      gap: 16px;
       z-index: 10;
       backdrop-filter: blur(12px);
+      overflow-y: auto;
     }
 
     .header h1 {
@@ -74,20 +75,60 @@
       margin-bottom: 8px;
     }
 
-    select, button {
-      width: 100%;
-      padding: 8px 12px;
+    /* Multi-select Movie Checklist */
+    #film-list-container {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      max-height: 240px;
+      overflow-y: auto;
+      background: #12141a;
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      padding: 8px;
+    }
+
+    .film-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 0.8rem;
+      color: var(--text-main);
+      cursor: pointer;
+      user-select: none;
+      padding: 3px 4px;
+      border-radius: 3px;
+    }
+    .film-item:hover {
+      background: rgba(255, 255, 255, 0.05);
+    }
+    .film-color-chip {
+      width: 12px;
+      height: 12px;
+      border-radius: 2px;
+      flex-shrink: 0;
+    }
+
+    .btn-group {
+      display: flex;
+      gap: 8px;
+    }
+
+    button {
+      flex: 1;
+      padding: 6px 10px;
       background: #181b24;
       border: 1px solid var(--border-color);
       color: var(--text-main);
       border-radius: 4px;
       font-family: var(--font-sans);
-      font-size: 0.85rem;
+      font-size: 0.75rem;
       outline: none;
       cursor: pointer;
     }
-    select:focus, button:hover {
+    button:hover {
       border-color: var(--accent-color);
+      background: #222632;
     }
 
     /* Right Inspection Panel */
@@ -106,7 +147,7 @@
 
     #preview-frame {
       width: 100%;
-      height: 200px;
+      height: 190px;
       background: #12141a;
       border: 1px solid var(--border-color);
       border-radius: 4px;
@@ -136,23 +177,24 @@
       font-style: italic;
     }
 
-    /* HUD Legend & Status */
-    #hud-axes {
-      position: absolute;
-      bottom: 20px;
-      left: 340px;
+    /* 3D Label Styling */
+    .axis-3d-label {
       font-family: var(--font-mono);
-      font-size: 0.7rem;
-      color: var(--text-muted);
-      background: rgba(18, 20, 26, 0.8);
-      padding: 8px 12px;
-      border-radius: 4px;
-      border: 1px solid var(--border-color);
+      font-size: 11px;
+      font-weight: 600;
+      color: #f1f5f9;
+      background: rgba(13, 14, 18, 0.85);
+      border: 1px solid #3b82f6;
+      padding: 4px 8px;
+      border-radius: 3px;
       pointer-events: none;
+      white-space: nowrap;
+      box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
     }
   </style>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/renderers/CSS2DRenderer.js"></script>
 </head>
 <body>
 
@@ -166,31 +208,31 @@
       </div>
 
       <div>
-        <div class="section-title">Film Selection</div>
-        <select id="film-select">
-          <option value="ALL">Show All Trajectories</option>
-        </select>
+        <div class="section-title">Film Selection (Multi-Select)</div>
+        <div class="btn-group" style="margin-bottom: 8px;">
+          <button id="btn-select-all">Select All</button>
+          <button id="btn-clear-all">Clear All</button>
+        </div>
+        <div id="film-list-container"></div>
       </div>
 
       <div>
-        <div class="section-title">Display Mode</div>
-        <button id="btn-toggle-splines">Toggle Trajectory Lines</button>
+        <div class="section-title">Display Options</div>
+        <button id="btn-toggle-splines">Toggle Trajectory Splines</button>
       </div>
 
       <div>
-        <div class="section-title">Pipeline Summary</div>
-        <div style="font-size: 0.75rem; color: var(--text-muted); line-height: 1.5;">
-          Image statistics (contrast, spatial frequency) aligned with high-dimensional language vectors via joint CCA/projection.
+        <div class="section-title">Space Architecture</div>
+        <div style="font-size: 0.72rem; color: var(--text-muted); line-height: 1.5;">
+          • <strong>X Axis</strong>: Spatial Frequency & Edge Density<br/>
+          • <strong>Y Axis</strong>: Luminance Flux & Frame Contrast<br/>
+          • <strong>Z Axis</strong>: Joint Semantic Embedding Weight
         </div>
       </div>
     </div>
 
     <!-- Main Canvas -->
-    <div id="canvas-container">
-      <div id="hud-axes">
-        Axes: X = Spatial Frequency | Y = Luminance / Contrast | Z = Semantic Embedding
-      </div>
-    </div>
+    <div id="canvas-container"></div>
 
     <!-- Right Inspector Panel -->
     <div id="inspector">
@@ -200,22 +242,30 @@
       <div id="stats-container">
         <div class="stat-row"><span class="stat-label">Film:</span><span class="stat-value" id="val-film">—</span></div>
         <div class="stat-row"><span class="stat-label">Scene Index:</span><span class="stat-value" id="val-scene">—</span></div>
-        <div class="stat-row"><span class="stat-label">Alignment Metric:</span><span class="stat-value" id="val-align">—</span></div>
+        <div class="stat-row"><span class="stat-label">Alignment Score:</span><span class="stat-value" id="val-align">—</span></div>
       </div>
 
-      <div class="section-title">Aligned Review Excerpt</div>
-      <div id="review-excerpt">Click or hover over any scene node to inspect the aligned text and image statistics.</div>
+      <div class="section-title">Aligned Review Fragment</div>
+      <div id="review-excerpt">Hover or click any scene node to inspect its frame image and aligned IMDB text excerpt.</div>
     </div>
 
   </div>
 
   <script>
-    let scene, camera, renderer, controls;
+    let scene, camera, renderer, labelRenderer, controls;
     let pointSprites = [], trajectoryLines = [];
-    let rawData = null, pointsData = [];
+    let pointsData = [];
     let raycaster, mouse;
+    let splinesVisible = true;
 
-    const filmSelect = document.getElementById('film-select');
+    // Qualitative Color Palette for Films
+    const PALETTE = [
+      '#4f46e5', '#f59e0b', '#10b981', '#ec4899', '#8b5cf6',
+      '#06b6d4', '#f97316', '#84cc16', '#6366f1', '#d97706', '#14b8a6'
+    ];
+    const filmColorMap = {};
+
+    const filmListContainer = document.getElementById('film-list-container');
     const previewFrame = document.getElementById('preview-frame');
     const valFilm = document.getElementById('val-film');
     const valScene = document.getElementById('val-scene');
@@ -238,6 +288,13 @@
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       container.appendChild(renderer.domElement);
 
+      labelRenderer = new THREE.CSS2DRenderer();
+      labelRenderer.setSize(container.clientWidth, container.clientHeight);
+      labelRenderer.domElement.style.position = 'absolute';
+      labelRenderer.domElement.style.top = '0px';
+      labelRenderer.domElement.style.pointerEvents = 'none';
+      container.appendChild(labelRenderer.domElement);
+
       controls = new THREE.OrbitControls(camera, renderer.domElement);
       controls.enableDamping = true;
       controls.dampingFactor = 0.05;
@@ -245,45 +302,84 @@
       raycaster = new THREE.Raycaster();
       mouse = new THREE.Vector2(-100, -100);
 
-      // Clean Minimalist Grid
+      // Grid Base
       const grid = new THREE.GridHelper(80, 40, 0x2a2d3a, 0x181b24);
       grid.position.y = -20;
       scene.add(grid);
 
+      // Add Space Labels
+      setupSpaceLabels();
+
       // Load Data
       fetch('./rosetta_manifold_data.json')
         .then(res => res.json())
-        .then(data => {
-          rawData = data;
-          parseAndBuild(data);
-        })
+        .then(data => parseAndBuild(data))
         .catch(err => console.error("Error loading manifold data:", err));
 
       window.addEventListener('resize', onWindowResize);
       container.addEventListener('mousemove', onMouseMove);
       container.addEventListener('click', onClick);
 
-      filmSelect.addEventListener('change', (e) => filterByFilm(e.target.value));
+      document.getElementById('btn-select-all').addEventListener('click', () => setAllFilmsState(true));
+      document.getElementById('btn-clear-all').addEventListener('click', () => setAllFilmsState(false));
+      document.getElementById('btn-toggle-splines').addEventListener('click', toggleSplines);
 
       animate();
+    }
+
+    function createCSSLabel(text, color = '#3b82f6') {
+      const div = document.createElement('div');
+      div.className = 'axis-3d-label';
+      div.textContent = text;
+      div.style.borderColor = color;
+      return new THREE.CSS2DObject(div);
+    }
+
+    function setupSpaceLabels() {
+      const xPos = createCSSLabel('X+ [High Spatial Frequency / Detail]', '#60a5fa');
+      xPos.position.set(22, -19, 0);
+      scene.add(xPos);
+
+      const xNeg = createCSSLabel('X- [Low Spatial Frequency / Smooth]', '#60a5fa');
+      xNeg.position.set(-22, -19, 0);
+      scene.add(xNeg);
+
+      const yPos = createCSSLabel('Y+ [High Luminance / High Contrast]', '#f59e0b');
+      yPos.position.set(0, 22, 0);
+      scene.add(yPos);
+
+      const zPos = createCSSLabel('Z+ [Psychological / Thriller Semantic Vector]', '#10b981');
+      zPos.position.set(0, -19, 22);
+      scene.add(zPos);
     }
 
     function parseAndBuild(data) {
       pointsData = [];
       const movies = data.movies || [];
 
-      // Populate film dropdown
-      movies.forEach(m => {
-        const title = m.title || m.name || 'Unknown Film';
-        const opt = document.createElement('option');
-        opt.value = title;
-        opt.textContent = title;
-        filmSelect.appendChild(opt);
+      // Assign palette colors & build checklist
+      movies.forEach((movie, i) => {
+        const title = movie.title || movie.name || `Film ${i + 1}`;
+        const color = PALETTE[i % PALETTE.length];
+        filmColorMap[title] = color;
+
+        // Add checkbox entry
+        const item = document.createElement('label');
+        item.className = 'film-item';
+        item.innerHTML = `
+          <input type="checkbox" value="${title}" checked data-film="${title}"/>
+          <span class="film-color-chip" style="background:${color}"></span>
+          <span>${title}</span>
+        `;
+        filmListContainer.appendChild(item);
       });
 
-      // Extract all scenes
+      // Handle checkbox change events
+      filmListContainer.addEventListener('change', updateVisibility);
+
+      // Extract all scene nodes
       movies.forEach(movie => {
-        const title = movie.title || movie.name || 'Unknown Film';
+        const title = movie.title || movie.name;
         const scenes = movie.scenes || movie.frames || movie.trajectory || [];
         scenes.forEach((sc, idx) => {
           pointsData.push({
@@ -307,10 +403,18 @@
       const scale = 36.0 / maxSpan;
       const cX = (minX + maxX) / 2, cY = (minY + maxY) / 2, cZ = (minZ + maxZ) / 2;
 
-      // Create Sprites for Scene Nodes
-      const spriteMap = new THREE.TextureLoader().load('https://threejs.org/examples/textures/sprites/disc.png');
+      // Disc Texture for Sprites
+      const canvas = document.createElement('canvas');
+      canvas.width = 64; canvas.height = 64;
+      const ctx = canvas.getContext('2d');
+      ctx.beginPath();
+      ctx.arc(32, 32, 28, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.fill();
+      const discTexture = new THREE.CanvasTexture(canvas);
 
-      pointsData.forEach((node, i) => {
+      // Create Colored Sprites
+      pointsData.forEach(node => {
         const [rawX, rawY, rawZ] = node.coords_3d || node.coords || [0, 0, 0];
         const x = (rawX - cX) * scale;
         const y = (rawY - cY) * scale;
@@ -318,31 +422,34 @@
 
         node.worldPos = new THREE.Vector3(x, y, z);
 
+        const hexColor = filmColorMap[node.film_title] || '#3b82f6';
         const mat = new THREE.SpriteMaterial({
-          map: spriteMap,
-          color: 0x3b82f6,
+          map: discTexture,
+          color: new THREE.Color(hexColor),
           transparent: true,
-          opacity: 0.8
+          opacity: 0.85
         });
 
         const sprite = new THREE.Sprite(mat);
         sprite.position.copy(node.worldPos);
-        sprite.scale.set(1.2, 1.2, 1.2);
+        sprite.scale.set(1.1, 1.1, 1.1);
         sprite.userData = node;
 
         scene.add(sprite);
         pointSprites.push(sprite);
       });
 
-      // Build Trajectory Lines per Film
+      // Build Categorical Spline Curves per Film
       movies.forEach(movie => {
         const title = movie.title || movie.name;
+        const color = filmColorMap[title] || '#3b82f6';
         const filmNodes = pointsData.filter(p => p.film_title === title);
+
         if (filmNodes.length > 1) {
           const points = filmNodes.map(n => n.worldPos);
           const curve = new THREE.CatmullRomCurve3(points);
           const geometry = new THREE.BufferGeometry().setFromPoints(curve.getPoints(filmNodes.length * 4));
-          const material = new THREE.LineBasicMaterial({ color: 0x60a5fa, transparent: true, opacity: 0.4 });
+          const material = new THREE.LineBasicMaterial({ color: new THREE.Color(color), transparent: true, opacity: 0.6, linewidth: 2 });
           const line = new THREE.Line(geometry, material);
           line.userData = { film: title };
           scene.add(line);
@@ -351,24 +458,30 @@
       });
     }
 
-    function filterByFilm(selectedFilm) {
+    function updateVisibility() {
+      const activeFilms = new Set(
+        Array.from(filmListContainer.querySelectorAll('input:checked')).map(cb => cb.value)
+      );
+
       pointSprites.forEach(sprite => {
-        if (selectedFilm === 'ALL' || sprite.userData.film_title === selectedFilm) {
-          sprite.visible = true;
-          sprite.material.color.setHex(selectedFilm === 'ALL' ? 0x3b82f6 : 0xf59e0b);
-        } else {
-          sprite.visible = false;
-        }
+        sprite.visible = activeFilms.has(sprite.userData.film_title);
       });
 
       trajectoryLines.forEach(line => {
-        if (selectedFilm === 'ALL' || line.userData.film === selectedFilm) {
-          line.visible = true;
-          line.material.opacity = selectedFilm === 'ALL' ? 0.4 : 0.9;
-        } else {
-          line.visible = false;
-        }
+        line.visible = splinesVisible && activeFilms.has(line.userData.film);
       });
+    }
+
+    function setAllFilmsState(checked) {
+      filmListContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+        cb.checked = checked;
+      });
+      updateVisibility();
+    }
+
+    function toggleSplines() {
+      splinesVisible = !splinesVisible;
+      updateVisibility();
     }
 
     function updateInspector(node) {
@@ -394,7 +507,8 @@
 
     function onClick() {
       raycaster.setFromCamera(mouse, camera);
-      const intersects = raycaster.intersectObjects(pointSprites);
+      const visibleSprites = pointSprites.filter(s => s.visible);
+      const intersects = raycaster.intersectObjects(visibleSprites);
       if (intersects.length > 0) {
         const selected = intersects[0].object.userData;
         updateInspector(selected);
@@ -406,29 +520,30 @@
       camera.aspect = container.clientWidth / container.clientHeight;
       camera.updateProjectionMatrix();
       renderer.setSize(container.clientWidth, container.clientHeight);
+      labelRenderer.setSize(container.clientWidth, container.clientHeight);
     }
 
     function animate() {
       requestAnimationFrame(animate);
       controls.update();
 
-      // Hover Effect
+      const visibleSprites = pointSprites.filter(s => s.visible);
       raycaster.setFromCamera(mouse, camera);
-      const intersects = raycaster.intersectObjects(pointSprites);
+      const intersects = raycaster.intersectObjects(visibleSprites);
 
-      pointSprites.forEach(s => {
-        if (s.visible) s.scale.set(1.2, 1.2, 1.2);
-      });
+      visibleSprites.forEach(s => s.scale.set(1.1, 1.1, 1.1));
 
       if (intersects.length > 0) {
         document.body.style.cursor = 'pointer';
         const hovered = intersects[0].object;
         hovered.scale.set(2.2, 2.2, 2.2);
+        updateInspector(hovered.userData);
       } else {
         document.body.style.cursor = 'default';
       }
 
       renderer.render(scene, camera);
+      labelRenderer.render(scene, camera);
     }
   </script>
 </body>
