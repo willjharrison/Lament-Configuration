@@ -39,7 +39,7 @@
 
     /* Left Control Sidebar */
     #sidebar {
-      width: 340px;
+      width: 320px;
       height: 100%;
       background: var(--panel-bg);
       border-right: 1px solid var(--border-color);
@@ -112,7 +112,7 @@
       display: flex;
       flex-direction: column;
       gap: 6px;
-      max-height: 180px;
+      max-height: 200px;
       overflow-y: auto;
       background: #12141a;
       border: 1px solid var(--border-color);
@@ -166,7 +166,7 @@
 
     #preview-frame {
       width: 100%;
-      height: 190px;
+      height: 200px;
       background: #12141a;
       border: 1px solid var(--border-color);
       border-radius: 4px;
@@ -179,21 +179,22 @@
       justify-content: space-between;
       font-family: var(--font-mono);
       font-size: 0.75rem;
-      padding: 4px 0;
+      padding: 5px 0;
       border-bottom: 1px dashed rgba(255, 255, 255, 0.08);
     }
     .stat-label { color: var(--text-muted); }
     .stat-value { color: var(--accent-color); font-weight: 600; }
 
     #review-excerpt {
-      font-size: 0.8rem;
+      font-size: 0.82rem;
       color: var(--text-main);
       line-height: 1.5;
       background: rgba(255, 255, 255, 0.03);
-      padding: 12px;
+      padding: 14px;
       border-radius: 4px;
       border-left: 3px solid var(--accent-color);
       font-style: italic;
+      min-height: 120px;
     }
 
     /* 3D Label Styling */
@@ -276,8 +277,8 @@
         <div class="stat-row"><span class="stat-label">Alignment Score:</span><span class="stat-value" id="val-align">—</span></div>
       </div>
 
-      <div class="section-title">Aligned Review Fragment</div>
-      <div id="review-excerpt">Hover or click any scene node to inspect its frame image and aligned IMDB text excerpt.</div>
+      <div class="section-title">Aligned Review Excerpt</div>
+      <div id="review-excerpt">Click or hover over any node in the 3D space to lock and inspect its aligned text description and frame cut.</div>
     </div>
 
   </div>
@@ -288,6 +289,7 @@
     let pointsData = [], rawMoviesData = [];
     let raycaster, mouse;
     let splinesVisible = true;
+    let lockedNode = null;
 
     let xLabelObj, yLabelObj, zLabelObj;
 
@@ -297,7 +299,6 @@
     ];
     const filmColorMap = {};
 
-    // Available Feature Dimensions mapping
     const availableDimensions = [
       { id: 'dim_0', name: 'Spatial Frequency / Edge Density', idx: 0 },
       { id: 'dim_1', name: 'Luminance Flux / Contrast', idx: 1 },
@@ -344,6 +345,7 @@
       controls.dampingFactor = 0.05;
 
       raycaster = new THREE.Raycaster();
+      raycaster.params.Points.threshold = 1.2;
       mouse = new THREE.Vector2(-100, -100);
 
       // Grid Base
@@ -362,7 +364,7 @@
 
       window.addEventListener('resize', onWindowResize);
       container.addEventListener('mousemove', onMouseMove);
-      container.addEventListener('click', onClick);
+      container.addEventListener('pointerdown', onPointerDown);
 
       document.getElementById('btn-select-all').addEventListener('click', () => setAllFilmsState(true));
       document.getElementById('btn-clear-all').addEventListener('click', () => setAllFilmsState(false));
@@ -416,7 +418,6 @@
       pointsData = [];
       rawMoviesData = data.movies || [];
 
-      // If json contains more feature dimensions, dynamically discover them
       if (data.metadata && Array.isArray(data.metadata.dimensions)) {
         availableDimensions.length = 0;
         data.metadata.dimensions.forEach((dimName, i) => {
@@ -425,7 +426,6 @@
         setupAxisDropdowns();
       }
 
-      // Assign palette colors & build checklist
       rawMoviesData.forEach((movie, i) => {
         const title = movie.title || movie.name || `Film ${i + 1}`;
         const color = PALETTE[i % PALETTE.length];
@@ -443,7 +443,6 @@
 
       filmListContainer.addEventListener('change', updateVisibility);
 
-      // Extract all scene nodes
       rawMoviesData.forEach(movie => {
         const title = movie.title || movie.name;
         const scenes = movie.scenes || movie.frames || movie.trajectory || [];
@@ -451,13 +450,12 @@
           pointsData.push({
             ...sc,
             film_title: title,
-            scene_idx: sc.scene_id || sc.scene_index || idx,
+            scene_idx: sc.scene_id !== undefined ? sc.scene_id : (sc.scene_index !== undefined ? sc.scene_index : idx),
             raw_coords: sc.coords_3d || sc.coords || [0, 0, 0]
           });
         });
       });
 
-      // Disc Texture for Sprites
       const canvas = document.createElement('canvas');
       canvas.width = 64; canvas.height = 64;
       const ctx = canvas.getContext('2d');
@@ -467,7 +465,6 @@
       ctx.fill();
       const discTexture = new THREE.CanvasTexture(canvas);
 
-      // Create Colored Sprites
       pointsData.forEach(node => {
         const hexColor = filmColorMap[node.film_title] || '#3b82f6';
         const mat = new THREE.SpriteMaterial({
@@ -478,7 +475,7 @@
         });
 
         const sprite = new THREE.Sprite(mat);
-        sprite.scale.set(1.1, 1.1, 1.1);
+        sprite.scale.set(1.2, 1.2, 1.2);
         sprite.userData = node;
 
         scene.add(sprite);
@@ -486,6 +483,11 @@
       });
 
       recalculateSpatialPositions();
+
+      // Automatically inspect the first node on load
+      if (pointsData.length > 0) {
+        updateInspector(pointsData[0]);
+      }
     }
 
     function recalculateSpatialPositions() {
@@ -495,7 +497,6 @@
       currentYIdx = parseInt(selectY.value);
       currentZIdx = parseInt(selectZ.value);
 
-      // Extract current 3D positions based on selected dimensions
       let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
 
       pointsData.forEach(node => {
@@ -515,7 +516,6 @@
       const scale = 36.0 / maxSpan;
       const cX = (minX + maxX) / 2, cY = (minY + maxY) / 2, cZ = (minZ + maxZ) / 2;
 
-      // Update Node World Positions
       pointSprites.forEach((sprite) => {
         const node = sprite.userData;
         const targetPos = new THREE.Vector3(
@@ -527,7 +527,6 @@
         sprite.position.copy(targetPos);
       });
 
-      // Rebuild Trajectory Spline Curves
       trajectoryLines.forEach(line => scene.remove(line));
       trajectoryLines.length = 0;
 
@@ -548,7 +547,6 @@
         }
       });
 
-      // Update Axis Labels
       xLabelObj.element.textContent = 'X: ' + availableDimensions[currentXIdx].name;
       yLabelObj.element.textContent = 'Y: ' + availableDimensions[currentYIdx].name;
       zLabelObj.element.textContent = 'Z: ' + availableDimensions[currentZIdx].name;
@@ -584,34 +582,42 @@
       updateVisibility();
     }
 
+    function getTextSnippet(node) {
+      if (!node) return '';
+      return node.text_snippet || node.review_snippet || node.review_text || node.text || node.snippet || node.caption || node.review || '';
+    }
+
     function updateInspector(node) {
       if (!node) return;
       valFilm.textContent = node.film_title || '—';
       valScene.textContent = node.scene_idx !== undefined ? node.scene_idx : '—';
       valAlign.textContent = node.alignment_score ? node.alignment_score.toFixed(4) : '0.8421';
 
-      let imgSrc = node.img_base64 || node.frame_base64 || node.thumbnail || '';
+      let imgSrc = node.img_base64 || node.frame_base64 || node.thumbnail || node.image || '';
       if (imgSrc && !imgSrc.startsWith('data:') && !imgSrc.startsWith('http')) {
         imgSrc = 'data:image/jpeg;base64,' + imgSrc;
       }
       previewFrame.src = imgSrc || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100%" height="100%" fill="%2312141a"/></svg>';
 
-      reviewExcerpt.textContent = node.text_snippet || node.review_snippet || node.review_text || node.caption || 'No review excerpt aligned for this specific frame cut.';
+      const txt = getTextSnippet(node);
+      reviewExcerpt.textContent = txt ? `"${txt}"` : 'No review excerpt aligned for this specific frame cut.';
     }
 
     function onMouseMove(event) {
-      const rect = renderer.domElement.getBoundingClientRect();
+      const container = document.getElementById('canvas-container');
+      const rect = container.getBoundingClientRect();
       mouse.x = ((event.clientX - rect.left) / rect.width) * 2 - 1;
       mouse.y = -((event.clientY - rect.top) / rect.height) * 2 + 1;
     }
 
-    function onClick() {
+    function onPointerDown() {
       raycaster.setFromCamera(mouse, camera);
       const visibleSprites = pointSprites.filter(s => s.visible);
       const intersects = raycaster.intersectObjects(visibleSprites);
+
       if (intersects.length > 0) {
-        const selected = intersects[0].object.userData;
-        updateInspector(selected);
+        lockedNode = intersects[0].object.userData;
+        updateInspector(lockedNode);
       }
     }
 
@@ -631,13 +637,15 @@
       raycaster.setFromCamera(mouse, camera);
       const intersects = raycaster.intersectObjects(visibleSprites);
 
-      visibleSprites.forEach(s => s.scale.set(1.1, 1.1, 1.1));
+      visibleSprites.forEach(s => {
+        const isLocked = lockedNode && s.userData === lockedNode;
+        s.scale.set(isLocked ? 2.2 : 1.2, isLocked ? 2.2 : 1.2, isLocked ? 2.2 : 1.2);
+      });
 
       if (intersects.length > 0) {
         document.body.style.cursor = 'pointer';
         const hovered = intersects[0].object;
-        hovered.scale.set(2.2, 2.2, 2.2);
-        updateInspector(hovered.userData);
+        hovered.scale.set(2.4, 2.4, 2.4);
       } else {
         document.body.style.cursor = 'default';
       }
