@@ -97,7 +97,7 @@
 
   <div id="hud">
     <h1>Lament Configuration</h1>
-    <p>Manifold Architecture: Visual Statistics $\leftrightarrow$ IMDB Semantic Geometry</p>
+    <p>Manifold Architecture: Visual Statistics ⟷ IMDB Semantic Geometry</p>
   </div>
 
   <div id="tooltip">
@@ -143,7 +143,7 @@
       raycaster.params.Points.threshold = 0.9;
       mouse = new THREE.Vector2(-100, -100);
 
-      // Add brass ambient light & subtle grid mechanism
+      // Add brass ambient light & grid mechanism
       const ambientLight = new THREE.AmbientLight(0xd4af37, 0.5);
       scene.add(ambientLight);
 
@@ -151,9 +151,17 @@
       gridHelper.position.y = -25;
       scene.add(gridHelper);
 
+      // Relative path handling for GitHub Pages sub-directories
+      const jsonPath = './rosetta_manifold_data.json';
+
       // 2. Load Manifold Data
-      fetch('rosetta_manifold_data.json')
-        .then(res => res.json())
+      fetch(jsonPath)
+        .then(res => {
+          if (!res.ok) {
+            throw new Error(`HTTP error! Status: ${res.status}`);
+          }
+          return res.json();
+        })
         .then(data => {
           buildLamentManifold(data);
         })
@@ -166,25 +174,33 @@
     }
 
     function buildLamentManifold(data) {
-      pointsData = data;
-      const count = data.length;
+      // Support array or object root payloads
+      pointsData = Array.isArray(data) ? data : (data.scenes || data.points || []);
+      const count = pointsData.length;
+
+      if (count === 0) {
+        console.warn("No manifold data points found in JSON structure.");
+        return;
+      }
+
       const geometry = new THREE.BufferGeometry();
       const positions = new Float32Array(count * 3);
       const colors = new Float32Array(count * 3);
 
-      // Brass / Metallic Palette
+      // Metallic Palette
       const baseGold = new THREE.Color(0xd4af37);
       const darkBronze = new THREE.Color(0x8b5a2b);
       const highlightGold = new THREE.Color(0xffe893);
 
-      data.forEach((item, i) => {
-        // Map 3D coordinates from JSON
-        const [x, y, z] = item.coords_3d || [0, 0, 0];
+      pointsData.forEach((item, i) => {
+        // Fallback checks across potential key names
+        const coords = item.coords_3d || item.coords || [0, 0, 0];
+        const [x, y, z] = coords;
+        
         positions[i * 3]     = x;
         positions[i * 3 + 1] = y;
         positions[i * 3 + 2] = z;
 
-        // Color gradient mapped across spatial placement
         const norm = Math.min(Math.max((x + 20) / 40, 0), 1);
         const nodeColor = baseGold.clone().lerp(norm > 0.5 ? highlightGold : darkBronze, Math.abs(norm - 0.5) * 2);
 
@@ -196,7 +212,6 @@
       geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
       geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
 
-      // Particle Material
       const pMaterial = new THREE.PointsMaterial({
         size: 1.3,
         vertexColors: true,
@@ -227,12 +242,10 @@
       requestAnimationFrame(animate);
       controls.update();
 
-      // Slow idle rotation of the configuration box when not interacting
-      if (pointCloud && !controls.state == -1) {
+      if (pointCloud && controls.state === -1) {
         pointCloud.rotation.y += 0.0005;
       }
 
-      // Intersect Detection
       if (pointCloud) {
         raycaster.setFromCamera(mouse, camera);
         const intersects = raycaster.intersectObject(pointCloud);
