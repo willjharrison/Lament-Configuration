@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Cross-Modal Film Manifold — Review Embeddings ⟷ Visual Statistics</title>
+  <title>Cross-Modal Film Manifold — Dynamic Axis Mapping</title>
   <style>
     :root {
       --bg-color: #0d0e12;
@@ -75,12 +75,44 @@
       margin-bottom: 8px;
     }
 
+    .axis-control-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      background: #12141a;
+      border: 1px solid var(--border-color);
+      border-radius: 4px;
+      padding: 10px;
+    }
+    .axis-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      font-size: 0.78rem;
+    }
+    .axis-row label {
+      font-family: var(--font-mono);
+      font-weight: 600;
+      width: 24px;
+    }
+    select {
+      flex: 1;
+      padding: 4px 8px;
+      background: #181b24;
+      border: 1px solid var(--border-color);
+      color: var(--text-main);
+      border-radius: 3px;
+      font-size: 0.75rem;
+      outline: none;
+    }
+
     /* Multi-select Movie Checklist */
     #film-list-container {
       display: flex;
       flex-direction: column;
       gap: 6px;
-      max-height: 240px;
+      max-height: 180px;
       overflow-y: auto;
       background: #12141a;
       border: 1px solid var(--border-color);
@@ -99,20 +131,10 @@
       padding: 3px 4px;
       border-radius: 3px;
     }
-    .film-item:hover {
-      background: rgba(255, 255, 255, 0.05);
-    }
-    .film-color-chip {
-      width: 12px;
-      height: 12px;
-      border-radius: 2px;
-      flex-shrink: 0;
-    }
+    .film-item:hover { background: rgba(255, 255, 255, 0.05); }
+    .film-color-chip { width: 12px; height: 12px; border-radius: 2px; flex-shrink: 0; }
 
-    .btn-group {
-      display: flex;
-      gap: 8px;
-    }
+    .btn-group { display: flex; gap: 8px; }
 
     button {
       flex: 1;
@@ -126,10 +148,7 @@
       outline: none;
       cursor: pointer;
     }
-    button:hover {
-      border-color: var(--accent-color);
-      background: #222632;
-    }
+    button:hover { border-color: var(--accent-color); background: #222632; }
 
     /* Right Inspection Panel */
     #inspector {
@@ -192,6 +211,7 @@
       box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
     }
   </style>
+  <!-- Three.js Libraries -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/renderers/CSS2DRenderer.js"></script>
@@ -207,8 +227,28 @@
         <p>Linking IMDB review text embeddings to visual scene statistics.</p>
       </div>
 
+      <!-- Feature Axis Selectors -->
       <div>
-        <div class="section-title">Film Selection (Multi-Select)</div>
+        <div class="section-title">Projection Axes</div>
+        <div class="axis-control-group">
+          <div class="axis-row">
+            <label style="color:#60a5fa">X:</label>
+            <select id="select-axis-x"></select>
+          </div>
+          <div class="axis-row">
+            <label style="color:#f59e0b">Y:</label>
+            <select id="select-axis-y"></select>
+          </div>
+          <div class="axis-row">
+            <label style="color:#10b981">Z:</label>
+            <select id="select-axis-z"></select>
+          </div>
+        </div>
+      </div>
+
+      <!-- Multi-select Movie Checklist -->
+      <div>
+        <div class="section-title">Film Selection</div>
         <div class="btn-group" style="margin-bottom: 8px;">
           <button id="btn-select-all">Select All</button>
           <button id="btn-clear-all">Clear All</button>
@@ -219,15 +259,6 @@
       <div>
         <div class="section-title">Display Options</div>
         <button id="btn-toggle-splines">Toggle Trajectory Splines</button>
-      </div>
-
-      <div>
-        <div class="section-title">Space Architecture</div>
-        <div style="font-size: 0.72rem; color: var(--text-muted); line-height: 1.5;">
-          • <strong>X Axis</strong>: Spatial Frequency & Edge Density<br/>
-          • <strong>Y Axis</strong>: Luminance Flux & Frame Contrast<br/>
-          • <strong>Z Axis</strong>: Joint Semantic Embedding Weight
-        </div>
       </div>
     </div>
 
@@ -254,17 +285,30 @@
   <script>
     let scene, camera, renderer, labelRenderer, controls;
     let pointSprites = [], trajectoryLines = [];
-    let pointsData = [];
+    let pointsData = [], rawMoviesData = [];
     let raycaster, mouse;
     let splinesVisible = true;
 
-    // Qualitative Color Palette for Films
+    let xLabelObj, yLabelObj, zLabelObj;
+
     const PALETTE = [
       '#4f46e5', '#f59e0b', '#10b981', '#ec4899', '#8b5cf6',
       '#06b6d4', '#f97316', '#84cc16', '#6366f1', '#d97706', '#14b8a6'
     ];
     const filmColorMap = {};
 
+    // Available Feature Dimensions mapping
+    const availableDimensions = [
+      { id: 'dim_0', name: 'Spatial Frequency / Edge Density', idx: 0 },
+      { id: 'dim_1', name: 'Luminance Flux / Contrast', idx: 1 },
+      { id: 'dim_2', name: 'Semantic Embedding Projection', idx: 2 }
+    ];
+
+    let currentXIdx = 0, currentYIdx = 1, currentZIdx = 2;
+
+    const selectX = document.getElementById('select-axis-x');
+    const selectY = document.getElementById('select-axis-y');
+    const selectZ = document.getElementById('select-axis-z');
     const filmListContainer = document.getElementById('film-list-container');
     const previewFrame = document.getElementById('preview-frame');
     const valFilm = document.getElementById('val-film');
@@ -307,7 +351,7 @@
       grid.position.y = -20;
       scene.add(grid);
 
-      // Add Space Labels
+      setupAxisDropdowns();
       setupSpaceLabels();
 
       // Load Data
@@ -324,7 +368,26 @@
       document.getElementById('btn-clear-all').addEventListener('click', () => setAllFilmsState(false));
       document.getElementById('btn-toggle-splines').addEventListener('click', toggleSplines);
 
+      selectX.addEventListener('change', onAxisChange);
+      selectY.addEventListener('change', onAxisChange);
+      selectZ.addEventListener('change', onAxisChange);
+
       animate();
+    }
+
+    function setupAxisDropdowns() {
+      [selectX, selectY, selectZ].forEach((selectEl, sIdx) => {
+        selectEl.innerHTML = '';
+        availableDimensions.forEach((dim, dIdx) => {
+          const opt = document.createElement('option');
+          opt.value = dIdx;
+          opt.textContent = dim.name;
+          if (sIdx === 0 && dIdx === 0) opt.selected = true;
+          if (sIdx === 1 && dIdx === 1) opt.selected = true;
+          if (sIdx === 2 && dIdx === 2) opt.selected = true;
+          selectEl.appendChild(opt);
+        });
+      });
     }
 
     function createCSSLabel(text, color = '#3b82f6') {
@@ -336,34 +399,38 @@
     }
 
     function setupSpaceLabels() {
-      const xPos = createCSSLabel('X+ [High Spatial Frequency / Detail]', '#60a5fa');
-      xPos.position.set(22, -19, 0);
-      scene.add(xPos);
+      xLabelObj = createCSSLabel('X: ' + availableDimensions[currentXIdx].name, '#60a5fa');
+      xLabelObj.position.set(22, -19, 0);
+      scene.add(xLabelObj);
 
-      const xNeg = createCSSLabel('X- [Low Spatial Frequency / Smooth]', '#60a5fa');
-      xNeg.position.set(-22, -19, 0);
-      scene.add(xNeg);
+      yLabelObj = createCSSLabel('Y: ' + availableDimensions[currentYIdx].name, '#f59e0b');
+      yLabelObj.position.set(0, 22, 0);
+      scene.add(yLabelObj);
 
-      const yPos = createCSSLabel('Y+ [High Luminance / High Contrast]', '#f59e0b');
-      yPos.position.set(0, 22, 0);
-      scene.add(yPos);
-
-      const zPos = createCSSLabel('Z+ [Psychological / Thriller Semantic Vector]', '#10b981');
-      zPos.position.set(0, -19, 22);
-      scene.add(zPos);
+      zLabelObj = createCSSLabel('Z: ' + availableDimensions[currentZIdx].name, '#10b981');
+      zLabelObj.position.set(0, -19, 22);
+      scene.add(zLabelObj);
     }
 
     function parseAndBuild(data) {
       pointsData = [];
-      const movies = data.movies || [];
+      rawMoviesData = data.movies || [];
+
+      // If json contains more feature dimensions, dynamically discover them
+      if (data.metadata && Array.isArray(data.metadata.dimensions)) {
+        availableDimensions.length = 0;
+        data.metadata.dimensions.forEach((dimName, i) => {
+          availableDimensions.push({ id: `dim_${i}`, name: dimName, idx: i });
+        });
+        setupAxisDropdowns();
+      }
 
       // Assign palette colors & build checklist
-      movies.forEach((movie, i) => {
+      rawMoviesData.forEach((movie, i) => {
         const title = movie.title || movie.name || `Film ${i + 1}`;
         const color = PALETTE[i % PALETTE.length];
         filmColorMap[title] = color;
 
-        // Add checkbox entry
         const item = document.createElement('label');
         item.className = 'film-item';
         item.innerHTML = `
@@ -374,34 +441,21 @@
         filmListContainer.appendChild(item);
       });
 
-      // Handle checkbox change events
       filmListContainer.addEventListener('change', updateVisibility);
 
       // Extract all scene nodes
-      movies.forEach(movie => {
+      rawMoviesData.forEach(movie => {
         const title = movie.title || movie.name;
         const scenes = movie.scenes || movie.frames || movie.trajectory || [];
         scenes.forEach((sc, idx) => {
           pointsData.push({
             ...sc,
             film_title: title,
-            scene_idx: sc.scene_id || sc.scene_index || idx
+            scene_idx: sc.scene_id || sc.scene_index || idx,
+            raw_coords: sc.coords_3d || sc.coords || [0, 0, 0]
           });
         });
       });
-
-      // Bounding Normalization
-      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
-      pointsData.forEach(p => {
-        const [x, y, z] = p.coords_3d || p.coords || [0, 0, 0];
-        if (x < minX) minX = x; if (x > maxX) maxX = x;
-        if (y < minY) minY = y; if (y > maxY) maxY = y;
-        if (z < minZ) minZ = z; if (z > maxZ) maxZ = z;
-      });
-
-      const maxSpan = Math.max((maxX - minX) || 1, (maxY - minY) || 1, (maxZ - minZ) || 1);
-      const scale = 36.0 / maxSpan;
-      const cX = (minX + maxX) / 2, cY = (minY + maxY) / 2, cZ = (minZ + maxZ) / 2;
 
       // Disc Texture for Sprites
       const canvas = document.createElement('canvas');
@@ -415,13 +469,6 @@
 
       // Create Colored Sprites
       pointsData.forEach(node => {
-        const [rawX, rawY, rawZ] = node.coords_3d || node.coords || [0, 0, 0];
-        const x = (rawX - cX) * scale;
-        const y = (rawY - cY) * scale;
-        const z = (rawZ - cZ) * scale;
-
-        node.worldPos = new THREE.Vector3(x, y, z);
-
         const hexColor = filmColorMap[node.film_title] || '#3b82f6';
         const mat = new THREE.SpriteMaterial({
           map: discTexture,
@@ -431,7 +478,6 @@
         });
 
         const sprite = new THREE.Sprite(mat);
-        sprite.position.copy(node.worldPos);
         sprite.scale.set(1.1, 1.1, 1.1);
         sprite.userData = node;
 
@@ -439,8 +485,53 @@
         pointSprites.push(sprite);
       });
 
-      // Build Categorical Spline Curves per Film
-      movies.forEach(movie => {
+      recalculateSpatialPositions();
+    }
+
+    function recalculateSpatialPositions() {
+      if (pointsData.length === 0) return;
+
+      currentXIdx = parseInt(selectX.value);
+      currentYIdx = parseInt(selectY.value);
+      currentZIdx = parseInt(selectZ.value);
+
+      // Extract current 3D positions based on selected dimensions
+      let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity, minZ = Infinity, maxZ = -Infinity;
+
+      pointsData.forEach(node => {
+        const coords = node.raw_coords;
+        const xVal = coords[currentXIdx] !== undefined ? coords[currentXIdx] : coords[0] || 0;
+        const yVal = coords[currentYIdx] !== undefined ? coords[currentYIdx] : coords[1] || 0;
+        const zVal = coords[currentZIdx] !== undefined ? coords[currentZIdx] : coords[2] || 0;
+
+        node.curX = xVal; node.curY = yVal; node.curZ = zVal;
+
+        if (xVal < minX) minX = xVal; if (xVal > maxX) maxX = xVal;
+        if (yVal < minY) minY = yVal; if (yVal > maxY) maxY = yVal;
+        if (zVal < minZ) minZ = zVal; if (zVal > maxZ) maxZ = zVal;
+      });
+
+      const maxSpan = Math.max((maxX - minX) || 1, (maxY - minY) || 1, (maxZ - minZ) || 1);
+      const scale = 36.0 / maxSpan;
+      const cX = (minX + maxX) / 2, cY = (minY + maxY) / 2, cZ = (minZ + maxZ) / 2;
+
+      // Update Node World Positions
+      pointSprites.forEach((sprite) => {
+        const node = sprite.userData;
+        const targetPos = new THREE.Vector3(
+          (node.curX - cX) * scale,
+          (node.curY - cY) * scale,
+          (node.curZ - cZ) * scale
+        );
+        node.worldPos = targetPos;
+        sprite.position.copy(targetPos);
+      });
+
+      // Rebuild Trajectory Spline Curves
+      trajectoryLines.forEach(line => scene.remove(line));
+      trajectoryLines.length = 0;
+
+      rawMoviesData.forEach(movie => {
         const title = movie.title || movie.name;
         const color = filmColorMap[title] || '#3b82f6';
         const filmNodes = pointsData.filter(p => p.film_title === title);
@@ -449,13 +540,24 @@
           const points = filmNodes.map(n => n.worldPos);
           const curve = new THREE.CatmullRomCurve3(points);
           const geometry = new THREE.BufferGeometry().setFromPoints(curve.getPoints(filmNodes.length * 4));
-          const material = new THREE.LineBasicMaterial({ color: new THREE.Color(color), transparent: true, opacity: 0.6, linewidth: 2 });
+          const material = new THREE.LineBasicMaterial({ color: new THREE.Color(color), transparent: true, opacity: 0.6 });
           const line = new THREE.Line(geometry, material);
           line.userData = { film: title };
           scene.add(line);
           trajectoryLines.push(line);
         }
       });
+
+      // Update Axis Labels
+      xLabelObj.element.textContent = 'X: ' + availableDimensions[currentXIdx].name;
+      yLabelObj.element.textContent = 'Y: ' + availableDimensions[currentYIdx].name;
+      zLabelObj.element.textContent = 'Z: ' + availableDimensions[currentZIdx].name;
+
+      updateVisibility();
+    }
+
+    function onAxisChange() {
+      recalculateSpatialPositions();
     }
 
     function updateVisibility() {
@@ -473,9 +575,7 @@
     }
 
     function setAllFilmsState(checked) {
-      filmListContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-        cb.checked = checked;
-      });
+      filmListContainer.querySelectorAll('input[type="checkbox"]').forEach(cb => { cb.checked = checked; });
       updateVisibility();
     }
 
