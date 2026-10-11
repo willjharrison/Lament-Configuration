@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0"/>
-  <title>Cross-Modal Film Manifold — Dynamic Axis Mapping</title>
+  <title>Cross-Modal Film Manifold — Review Embeddings ⟷ Visual Statistics</title>
   <style>
     :root {
       --bg-color: #0d0e12;
@@ -170,7 +170,7 @@
       background: #12141a;
       border: 1px solid var(--border-color);
       border-radius: 4px;
-      object-fit: contain;
+      object-fit: cover;
       display: block;
     }
 
@@ -197,7 +197,7 @@
       min-height: 120px;
     }
 
-    /* 3D Label Styling */
+    /* 3D Space Label Styling */
     .axis-3d-label {
       font-family: var(--font-mono);
       font-size: 11px;
@@ -210,6 +210,22 @@
       pointer-events: none;
       white-space: nowrap;
       box-shadow: 0 0 10px rgba(0, 0, 0, 0.5);
+    }
+
+    .node-text-tag {
+      font-family: var(--font-sans);
+      font-size: 10px;
+      color: #f1f5f9;
+      background: rgba(18, 20, 26, 0.88);
+      border: 1px solid var(--border-color);
+      padding: 3px 6px;
+      border-radius: 3px;
+      pointer-events: none;
+      white-space: nowrap;
+      max-width: 220px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.6);
     }
   </style>
   <!-- Three.js Libraries -->
@@ -260,6 +276,7 @@
       <div>
         <div class="section-title">Display Options</div>
         <button id="btn-toggle-splines">Toggle Trajectory Splines</button>
+        <button id="btn-toggle-tags" style="margin-top: 6px;">Toggle 3D Text Cards</button>
       </div>
     </div>
 
@@ -285,10 +302,10 @@
 
   <script>
     let scene, camera, renderer, labelRenderer, controls;
-    let pointSprites = [], trajectoryLines = [];
+    let pointSprites = [], trajectoryLines = [], floatingTextLabels = [];
     let pointsData = [], rawMoviesData = [];
     let raycaster, mouse;
-    let splinesVisible = true;
+    let splinesVisible = true, tagsVisible = true;
     let lockedNode = null;
 
     let xLabelObj, yLabelObj, zLabelObj;
@@ -348,7 +365,6 @@
       raycaster.params.Points.threshold = 1.2;
       mouse = new THREE.Vector2(-100, -100);
 
-      // Grid Base
       const grid = new THREE.GridHelper(80, 40, 0x2a2d3a, 0x181b24);
       grid.position.y = -20;
       scene.add(grid);
@@ -356,7 +372,6 @@
       setupAxisDropdowns();
       setupSpaceLabels();
 
-      // Load Data
       fetch('./rosetta_manifold_data.json')
         .then(res => res.json())
         .then(data => parseAndBuild(data))
@@ -369,6 +384,7 @@
       document.getElementById('btn-select-all').addEventListener('click', () => setAllFilmsState(true));
       document.getElementById('btn-clear-all').addEventListener('click', () => setAllFilmsState(false));
       document.getElementById('btn-toggle-splines').addEventListener('click', toggleSplines);
+      document.getElementById('btn-toggle-tags').addEventListener('click', toggleTags);
 
       selectX.addEventListener('change', onAxisChange);
       selectY.addEventListener('change', onAxisChange);
@@ -400,6 +416,14 @@
       return new THREE.CSS2DObject(div);
     }
 
+    function createNodeTag(text, color = '#3b82f6') {
+      const div = document.createElement('div');
+      div.className = 'node-text-tag';
+      div.textContent = text;
+      div.style.borderLeft = `3px solid ${color}`;
+      return new THREE.CSS2DObject(div);
+    }
+
     function setupSpaceLabels() {
       xLabelObj = createCSSLabel('X: ' + availableDimensions[currentXIdx].name, '#60a5fa');
       xLabelObj.position.set(22, -19, 0);
@@ -412,6 +436,20 @@
       zLabelObj = createCSSLabel('Z: ' + availableDimensions[currentZIdx].name, '#10b981');
       zLabelObj.position.set(0, -19, 22);
       scene.add(zLabelObj);
+    }
+
+    function extractText(item, parentMovie) {
+      if (!item) return '';
+      return item.text_snippet || item.review_snippet || item.review_text || item.text || item.snippet || item.caption || item.review || (parentMovie ? (parentMovie.review_text || parentMovie.text_snippet || parentMovie.description || parentMovie.overview || '') : '');
+    }
+
+    function extractImage(item, parentMovie) {
+      if (!item) return '';
+      let img = item.img_base64 || item.frame_base64 || item.image_base64 || item.thumbnail || item.image || item.img || (parentMovie ? (parentMovie.thumbnail || parentMovie.image || '') : '');
+      if (img && !img.startsWith('data:') && !img.startsWith('http')) {
+        img = 'data:image/jpeg;base64,' + img;
+      }
+      return img;
     }
 
     function parseAndBuild(data) {
@@ -450,6 +488,7 @@
           pointsData.push({
             ...sc,
             film_title: title,
+            parent_movie: movie,
             scene_idx: sc.scene_id !== undefined ? sc.scene_id : (sc.scene_index !== undefined ? sc.scene_index : idx),
             raw_coords: sc.coords_3d || sc.coords || [0, 0, 0]
           });
@@ -465,7 +504,7 @@
       ctx.fill();
       const discTexture = new THREE.CanvasTexture(canvas);
 
-      pointsData.forEach(node => {
+      pointsData.forEach((node) => {
         const hexColor = filmColorMap[node.film_title] || '#3b82f6';
         const mat = new THREE.SpriteMaterial({
           map: discTexture,
@@ -484,7 +523,6 @@
 
       recalculateSpatialPositions();
 
-      // Automatically inspect the first node on load
       if (pointsData.length > 0) {
         updateInspector(pointsData[0]);
       }
@@ -516,6 +554,10 @@
       const scale = 36.0 / maxSpan;
       const cX = (minX + maxX) / 2, cY = (minY + maxY) / 2, cZ = (minZ + maxZ) / 2;
 
+      // Clear existing 3D text cards
+      floatingTextLabels.forEach(lbl => scene.remove(lbl));
+      floatingTextLabels.length = 0;
+
       pointSprites.forEach((sprite) => {
         const node = sprite.userData;
         const targetPos = new THREE.Vector3(
@@ -527,6 +569,7 @@
         sprite.position.copy(targetPos);
       });
 
+      // Build Trajectories & 3D Text Cards
       trajectoryLines.forEach(line => scene.remove(line));
       trajectoryLines.length = 0;
 
@@ -544,6 +587,18 @@
           line.userData = { film: title };
           scene.add(line);
           trajectoryLines.push(line);
+
+          // Place 1-2 floating text cards in 3D space per film
+          const midPoint = filmNodes[Math.floor(filmNodes.length / 2)];
+          const txt = extractText(midPoint, movie);
+          if (txt) {
+            const shortText = txt.length > 35 ? txt.substring(0, 35) + '…' : txt;
+            const tag = createNodeTag(`🎬 ${title}: "${shortText}"`, color);
+            tag.position.set(midPoint.worldPos.x + 1.2, midPoint.worldPos.y + 1.2, midPoint.worldPos.z);
+            tag.userData = { film: title };
+            scene.add(tag);
+            floatingTextLabels.push(tag);
+          }
         }
       });
 
@@ -570,6 +625,10 @@
       trajectoryLines.forEach(line => {
         line.visible = splinesVisible && activeFilms.has(line.userData.film);
       });
+
+      floatingTextLabels.forEach(lbl => {
+        lbl.visible = tagsVisible && activeFilms.has(lbl.userData.film);
+      });
     }
 
     function setAllFilmsState(checked) {
@@ -582,9 +641,9 @@
       updateVisibility();
     }
 
-    function getTextSnippet(node) {
-      if (!node) return '';
-      return node.text_snippet || node.review_snippet || node.review_text || node.text || node.snippet || node.caption || node.review || '';
+    function toggleTags() {
+      tagsVisible = !tagsVisible;
+      updateVisibility();
     }
 
     function updateInspector(node) {
@@ -593,13 +652,10 @@
       valScene.textContent = node.scene_idx !== undefined ? node.scene_idx : '—';
       valAlign.textContent = node.alignment_score ? node.alignment_score.toFixed(4) : '0.8421';
 
-      let imgSrc = node.img_base64 || node.frame_base64 || node.thumbnail || node.image || '';
-      if (imgSrc && !imgSrc.startsWith('data:') && !imgSrc.startsWith('http')) {
-        imgSrc = 'data:image/jpeg;base64,' + imgSrc;
-      }
+      const imgSrc = extractImage(node, node.parent_movie);
       previewFrame.src = imgSrc || 'data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><rect width="100%" height="100%" fill="%2312141a"/></svg>';
 
-      const txt = getTextSnippet(node);
+      const txt = extractText(node, node.parent_movie);
       reviewExcerpt.textContent = txt ? `"${txt}"` : 'No review excerpt aligned for this specific frame cut.';
     }
 
@@ -646,6 +702,7 @@
         document.body.style.cursor = 'pointer';
         const hovered = intersects[0].object;
         hovered.scale.set(2.4, 2.4, 2.4);
+        updateInspector(hovered.userData);
       } else {
         document.body.style.cursor = 'default';
       }
